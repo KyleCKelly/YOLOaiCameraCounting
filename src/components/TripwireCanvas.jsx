@@ -11,8 +11,10 @@ export default function TripwireCanvas({ cameraIp, socket, videoRef }) {
 
     socket.on("tripwire_update", (data) => {
       if (data.camera_ip === cameraIp) {
+        console.log("📡 Tripwire update received from server:", data);
         setTripwire(data.tripwire);
         setFlipDirection(data.flip_direction);
+        drawCanvas();
       }
     });
 
@@ -36,9 +38,9 @@ export default function TripwireCanvas({ cameraIp, socket, videoRef }) {
     const canvas = canvasRef.current;
     const video = videoRef.current;
 
-    // Ensure canvas matches the video dimensions
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // 🎯 Ensure the canvas is exactly 480x640 to match the video stream
+    canvas.width = 640;
+    canvas.height = 480;
   }
 
   function drawCanvas() {
@@ -52,6 +54,8 @@ export default function TripwireCanvas({ cameraIp, socket, videoRef }) {
 
     if (tripwire) {
       let { x1, y1, x2, y2 } = tripwire;
+
+      console.log("🎨 Drawing tripwire:", tripwire);
 
       // 🎯 Draw tripwire line
       ctx.beginPath();
@@ -113,23 +117,27 @@ export default function TripwireCanvas({ cameraIp, socket, videoRef }) {
     if (!videoRef.current || !canvasRef.current) return null;
 
     const videoRect = videoRef.current.getBoundingClientRect();
-    const canvasRect = canvasRef.current.getBoundingClientRect();
 
-    // Ensure the user is clicking inside the video stream area
+    // 🚫 Ignore clicks outside the 480x640 video area
     if (
-      e.clientX < videoRect.left || e.clientX > videoRect.right ||
-      e.clientY < videoRect.top || e.clientY > videoRect.bottom
+      e.clientX < videoRect.left ||
+      e.clientX > videoRect.right ||
+      e.clientY < videoRect.top ||
+      e.clientY > videoRect.bottom
     ) {
       return null;
     }
 
-    return {
-      x: (e.clientX - videoRect.left) * (canvasRef.current.width / videoRect.width),
-      y: (e.clientY - videoRect.top) * (canvasRef.current.height / videoRect.height),
-    };
+    // 🎯 Convert click position to canvas coordinates
+    const relativeX = Math.round(((e.clientX - videoRect.left) / videoRect.width) * 640);
+    const relativeY = Math.round(((e.clientY - videoRect.top) / videoRect.height) * 480);
+
+    return { x: relativeX, y: relativeY };
   }
 
   function handleMouseDown(e) {
+    if (e.button !== 0) return; // Left click only
+
     const coords = getRelativeCoordinates(e);
     if (!coords) return;
 
@@ -153,21 +161,38 @@ export default function TripwireCanvas({ cameraIp, socket, videoRef }) {
       y2: coords.y,
     }));
 
-    drawCanvas(); // Ensure immediate visual feedback
+    drawCanvas();
   }
 
-  function handleMouseUp() {
+  function handleMouseUp(e) {
+    if (e.button !== 0) return; // Left click only
+
     if (tripwire) {
-      console.log("🛠 Final tripwire:", tripwire);
+      console.log("✅ Final tripwire:", tripwire);
       setDrawing(false);
       socket.emit("set_tripwire", { camera_ip: cameraIp, tripwire, flip_direction: flipDirection });
+      drawCanvas();
     }
   }
 
   function handleMiddleClick(e) {
+    if (e.button !== 1) return; // Middle click only
     e.preventDefault();
+
+    console.log("🔄 Flipping tripwire direction");
     setFlipDirection((prev) => !prev);
     socket.emit("set_tripwire", { camera_ip: cameraIp, tripwire, flip_direction: !flipDirection });
+    drawCanvas();
+  }
+
+  function handleRightClick(e) {
+    if (e.button !== 2) return; // Right click only
+    e.preventDefault();
+
+    console.log("❌ Removing tripwire");
+    setTripwire(null);
+    socket.emit("set_tripwire", { camera_ip: cameraIp, tripwire: null });
+    drawCanvas();
   }
 
   return (
@@ -177,7 +202,8 @@ export default function TripwireCanvas({ cameraIp, socket, videoRef }) {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onContextMenu={handleMiddleClick} // Middle click to flip IN/OUT
+      onContextMenu={handleRightClick} // Right click removes tripwire
+      onAuxClick={handleMiddleClick} // Middle click flips direction
     />
   );
 }
